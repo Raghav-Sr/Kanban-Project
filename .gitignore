@@ -1,29 +1,22 @@
-### IntelliJ IDEA ###
-out/
-!**/src/main/**/out/
-!**/src/test/**/out/
+node_modules
 
-### Eclipse ###
-.apt_generated
-.classpath
-.factorypath
-.project
-.settings
-.springBeans
-.sts4-cache
-bin/
-!**/src/main/**/bin/
-!**/src/test/**/bin/
-
-### NetBeans ###
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
-
-### VS Code ###
-.vscode/
-
-### Mac OS ###
+# Output
+.output
+.vercel
+.netlify
+.wrangler
+/.svelte-kit
+/build
+# OS
 .DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.*
+!.env.example
+!.env.test
+
+# Vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*

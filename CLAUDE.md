@@ -29,36 +29,52 @@ A household task management Kanban board for families and roommates sharing a li
 - **Drag-and-Drop**: svelte-dnd-action
 - **UI Library**: Skeleton UI (Tailwind-based)
 
+## Development Commands
+
+```bash
+npm run dev          # Start dev server at localhost:5173
+npm run build        # Build for production
+npm run preview      # Preview production build
+npm run check        # Type-check the codebase
+npm run lint         # Run linter
+```
+
+## Environment Variables
+
+Copy `.env.example` to `.env` and add your Supabase credentials:
+- `PUBLIC_SUPABASE_URL` - Your Supabase project URL
+- `PUBLIC_SUPABASE_ANON_KEY` - Your Supabase anon/public key
+
 ## Design System
 
-Using Skeleton UI's design tokens for consistency:
+**Colors**
+- Background: White (`bg-white`)
+- Text: Black (`text-black`)
+- Task Cards: Light blue (`bg-sky-100`, hover: `bg-sky-200`)
+- Columns: Light gray (`bg-gray-100`)
+- Primary Buttons: Sky blue (`bg-sky-500`, hover: `bg-sky-600`)
+- Secondary Text: Gray (`text-gray-500`, `text-gray-600`)
 
 **Typography**
-- Uses Skeleton's default font stack or custom theme fonts
-- Headings: `font-heading-token` classes
-- Body: `font-token` classes
-
-**Colors**
-- Primary: Action buttons, active states, links
-- Secondary: Supporting UI elements
-- Surface: Cards, backgrounds
-- Use semantic color tokens (`text-primary-500`, `bg-surface-200`, etc.)
+- Headings: Bold, black text
+- Body: Regular weight, black text
+- Secondary info: Gray text (`text-gray-500`)
 
 **Spacing**
 - Follow Tailwind spacing scale (4px base): `p-2`, `m-4`, `gap-6`
-- Consistent padding: Cards use `p-4`, sections use `p-6`
+- Task cards: `p-3`
+- Sections: `p-6`
 
 **Sizing**
-- Cards: Consistent min-width for Kanban cards
-- Columns: Flexible width with min/max constraints
+- Columns: Fixed width `w-80` (320px)
+- Add button: `w-7 h-7` rounded circle
 - Touch targets: Minimum 44px for interactive elements
 
-**Components** (from Skeleton UI)
-- AppBar, AppShell for layout
-- Cards for task items
-- Modals for task detail view
-- Buttons, Inputs, Select for forms
-- Chips/Badges for labels and assignees
+**Components**
+- Task cards: Rounded corners (`rounded-lg`), light blue background
+- Columns: Rounded containers with gray background
+- Modals: Card-style with white background
+- Buttons: Rounded, sky blue for primary actions
 
 ## Best Practices
 
