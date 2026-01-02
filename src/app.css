@@ -2,3 +2,23 @@
 @import '@skeletonlabs/skeleton';
 @import '@skeletonlabs/skeleton/themes/cerberus';
 @config '../tailwind.config.js';
+
+/* Date Picker Styles */
+:root {
+	--date-picker-background: #ffffff;
+	--date-picker-foreground: #1f2937;
+	--date-picker-highlight-border: #0ea5e9;
+	--date-picker-highlight-shadow: rgba(14, 165, 233, 0.2);
+	--date-picker-selected-color: #0ea5e9;
+	--date-picker-selected-background: #e0f2fe;
+}
+
+/* Remove drag and drop borders */
+[aria-grabbed="true"] {
+	outline: none !important;
+	border: none !important;
+}
+
+.svelte-dnd-action-dragged-el {
+	outline: none !important;
+}

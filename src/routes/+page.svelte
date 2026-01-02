@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { dndzone } from 'svelte-dnd-action';
+	import { DatePicker } from 'date-picker-svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -14,6 +15,12 @@
 	let editTitle = $state('');
 	let editDescription = $state('');
 	let editAssigneeId = $state<string | null>(null);
+	let editDueDate = $state<Date | null>(null);
+	let showEditDatePicker = $state(false);
+	let showAddColumn = $state(false);
+	let newColumnName = $state('');
+	let newTaskDueDate = $state<Date | null>(null);
+	let showAddTaskDatePicker = $state(false);
 
 	// Create reactive task lists per column
 	let tasksByColumn = $state<Record<string, typeof data.tasks>>({});
@@ -91,6 +98,8 @@
 	function closeAddTask() {
 		showAddTask = false;
 		selectedColumnId = '';
+		newTaskDueDate = null;
+		showAddTaskDatePicker = false;
 	}
 
 	function openTaskDetail(task: typeof data.tasks[0]) {
@@ -98,6 +107,7 @@
 		editTitle = task.title;
 		editDescription = (task as any).description ?? '';
 		editAssigneeId = task.assignee_id ?? null;
+		editDueDate = task.due_date ? new Date(task.due_date) : null;
 		showTaskDetail = true;
 	}
 
@@ -107,18 +117,88 @@
 		editTitle = '';
 		editDescription = '';
 		editAssigneeId = null;
+		editDueDate = null;
+		showEditDatePicker = false;
+	}
+
+	function formatDateForDB(date: Date | null): string | null {
+		if (!date) return null;
+		return date.toISOString().split('T')[0];
+	}
+
+	function openAddColumn() {
+		showAddColumn = true;
+		newColumnName = '';
+	}
+
+	function closeAddColumn() {
+		showAddColumn = false;
+		newColumnName = '';
+	}
+
+	async function createColumn() {
+		if (!newColumnName.trim()) return;
+		loading = true;
+
+		const position = data.columns.length;
+
+		const { error } = await data.supabase.from('columns').insert({
+			name: newColumnName.trim(),
+			household_id: data.member.household_id,
+			position
+		});
+
+		if (error) {
+			console.error('Create column error:', error);
+			loading = false;
+			return;
+		}
+
+		// Refresh the page to get updated columns
+		loading = false;
+		closeAddColumn();
+		window.location.reload();
+	}
+
+	async function deleteTask() {
+		if (!selectedTask) return;
+		loading = true;
+
+		const { error } = await data.supabase
+			.from('tasks')
+			.delete()
+			.eq('id', selectedTask.id);
+
+		if (error) {
+			console.error('Delete error:', error);
+			loading = false;
+			return;
+		}
+
+		// Remove from local state
+		const columnId = selectedTask.column_id;
+		if (tasksByColumn[columnId]) {
+			tasksByColumn[columnId] = tasksByColumn[columnId].filter(t => t.id !== selectedTask.id);
+		}
+		updateTaskCounts();
+
+		loading = false;
+		closeTaskDetail();
 	}
 
 	async function saveTaskDetail() {
 		if (!selectedTask) return;
 		loading = true;
 
+		const dueDateString = formatDateForDB(editDueDate);
+
 		const { error } = await data.supabase
 			.from('tasks')
 			.update({
 				title: editTitle,
 				description: editDescription,
-				assignee_id: editAssigneeId
+				assignee_id: editAssigneeId,
+				due_date: dueDateString
 			})
 			.eq('id', selectedTask.id);
 
@@ -136,6 +216,7 @@
 		(selectedTask as any).description = editDescription;
 		selectedTask.assignee_id = editAssigneeId;
 		selectedTask.assignee = newAssignee ? { id: newAssignee.id, name: newAssignee.name } : null;
+		selectedTask.due_date = dueDateString;
 
 		// Update tasksByColumn to reflect the change
 		for (const columnId in tasksByColumn) {
@@ -146,7 +227,8 @@
 					...tasks[taskIndex],
 					title: editTitle,
 					assignee_id: editAssigneeId,
-					assignee: newAssignee ? { id: newAssignee.id, name: newAssignee.name } : null
+					assignee: newAssignee ? { id: newAssignee.id, name: newAssignee.name } : null,
+					due_date: dueDateString
 				};
 			}
 		}
@@ -174,7 +256,7 @@
 						</div>
 						<button
 							onclick={() => openAddTask(column.id)}
-							class="rounded-full bg-sky-200 text-gray-600 w-7 h-7 flex items-center justify-center hover:bg-sky-300"
+							class="rounded-full bg-sky-200 text-gray-600 w-7 h-7 flex items-center justify-center hover:bg-[#a8ddfb]"
 							aria-label="Add task"
 						>
 							+
@@ -189,18 +271,18 @@
 					use:dndzone={{
 						items: getTasksForColumn(column.id),
 						flipDurationMs: 0,
-						dropTargetStyle: { outline: 'none' }
+						dropTargetStyle: {}
 					}}
 					onconsider={(e) => handleDndConsider(column.id, e)}
 					onfinalize={(e) => handleDndFinalize(column.id, e)}
 				>
 					{#each getTasksForColumn(column.id) as task (task.id)}
-						<div class="rounded-lg bg-sky-100 p-3 cursor-grab hover:bg-sky-200 text-black active:cursor-grabbing">
+						<div class="rounded-lg bg-sky-100 p-3 cursor-grab hover:bg-[#d0ecfd] text-black active:cursor-grabbing">
 							<div class="flex items-start justify-between">
 								<p class="font-medium">{task.title}</p>
 								<button
 									onclick={(e) => { e.stopPropagation(); openTaskDetail(task); }}
-									class="text-gray-500 hover:text-gray-700 hover:bg-sky-300 p-1.5 -mr-1 -mt-1 rounded-full transition-colors"
+									class="text-gray-500 hover:text-gray-900 p-1.5 -mr-1 -mt-1 transition-colors"
 									aria-label="Task options"
 								>
 									<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -223,14 +305,25 @@
 				</div>
 			</div>
 		{/each}
+
+		<!-- Add Column Button -->
+		<div class="flex flex-shrink-0 items-start pt-3">
+			<button
+				onclick={openAddColumn}
+				class="rounded-full bg-sky-200 text-gray-600 w-7 h-7 flex items-center justify-center hover:bg-[#a8ddfb]"
+				aria-label="Add column"
+			>
+				+
+			</button>
+		</div>
 	</div>
 </div>
 
 <!-- Add Task Modal -->
 {#if showAddTask}
 	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onclick={closeAddTask}>
-		<div class="card w-full max-w-md p-6" onclick={(e) => e.stopPropagation()}>
-			<h2 class="h3 mb-4">Add Task</h2>
+		<div class="bg-white rounded-lg w-full max-w-md p-6" onclick={(e) => e.stopPropagation()}>
+			<h2 class="text-xl font-bold text-black mb-4">Add Task</h2>
 
 			<form
 				method="POST"
@@ -250,14 +343,14 @@
 				<input type="hidden" name="columnId" value={selectedColumnId} />
 				<input type="hidden" name="householdId" value={data.member.household_id} />
 
-				<label class="label">
-					<span>Title</span>
-					<input type="text" name="title" class="input" placeholder="Task title" required />
+				<label class="block mb-4">
+					<span class="text-sm text-gray-500 mb-1 block">Title</span>
+					<input type="text" name="title" class="w-full p-3 text-black bg-gray-50 border border-gray-200 rounded-lg focus:border-sky-500 focus:outline-none" placeholder="Task title" required />
 				</label>
 
-				<label class="label">
-					<span>Assignee</span>
-					<select name="assigneeId" class="select">
+				<label class="block mb-4">
+					<span class="text-sm text-gray-500 mb-1 block">Assignee</span>
+					<select name="assigneeId" class="w-full p-3 text-black bg-gray-50 border border-gray-200 rounded-lg focus:border-sky-500 focus:outline-none">
 						<option value="">Unassigned</option>
 						{#each data.members as member}
 							<option value={member.id}>{member.name}</option>
@@ -265,20 +358,86 @@
 					</select>
 				</label>
 
-				<label class="label">
-					<span>Due Date</span>
-					<input type="date" name="dueDate" class="input" />
-				</label>
+				<div class="block mb-4">
+					<span class="text-sm text-gray-500 mb-1 block">Due Date</span>
+					<input type="hidden" name="dueDate" value={newTaskDueDate ? formatDateForDB(newTaskDueDate) : ''} />
+					<div class="flex gap-2 items-center mb-2">
+						<input
+							type="date"
+							value={newTaskDueDate ? formatDateForDB(newTaskDueDate) : ''}
+							onfocus={() => showAddTaskDatePicker = true}
+							onchange={(e) => {
+								const val = e.currentTarget.value;
+								newTaskDueDate = val ? new Date(val + 'T00:00:00') : null;
+							}}
+							class="flex-1 p-3 text-black bg-gray-50 border border-gray-200 rounded-lg focus:border-sky-500 focus:outline-none"
+						/>
+						<button
+							type="button"
+							onclick={() => newTaskDueDate = null}
+							class="px-3 py-3 text-gray-500 hover:bg-gray-100 rounded-lg"
+							title="Clear date"
+						>
+							<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+							</svg>
+						</button>
+					</div>
+					{#if showAddTaskDatePicker}
+						<div class="relative z-10">
+							<DatePicker bind:value={newTaskDueDate} />
+							<button
+								type="button"
+								onclick={() => showAddTaskDatePicker = false}
+								class="mt-2 px-3 py-1 text-sm text-sky-600 hover:bg-sky-50 rounded"
+							>
+								Done
+							</button>
+						</div>
+					{/if}
+				</div>
 
 				<div class="flex justify-end gap-2">
-					<button type="button" class="btn preset-tonal-surface" onclick={closeAddTask}>
+					<button type="button" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg" onclick={closeAddTask}>
 						Cancel
 					</button>
-					<button type="submit" class="btn preset-filled-primary-500" disabled={loading}>
+					<button type="submit" class="px-4 py-2 bg-sky-500 text-white rounded-lg hover:bg-sky-600 disabled:opacity-50" disabled={loading}>
 						{loading ? 'Adding...' : 'Add Task'}
 					</button>
 				</div>
 			</form>
+		</div>
+	</div>
+{/if}
+
+<!-- Add Column Modal -->
+{#if showAddColumn}
+	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onclick={closeAddColumn}>
+		<div class="bg-white rounded-lg w-full max-w-md p-6" onclick={(e) => e.stopPropagation()}>
+			<h2 class="text-xl font-bold text-black mb-4">Add Column</h2>
+
+			<label class="block mb-4">
+				<span class="text-sm text-gray-500 mb-1 block">Column Name</span>
+				<input
+					type="text"
+					bind:value={newColumnName}
+					class="w-full p-3 text-black bg-gray-50 border border-gray-200 rounded-lg focus:border-sky-500 focus:outline-none"
+					placeholder="e.g., In Review"
+				/>
+			</label>
+
+			<div class="flex justify-end gap-2">
+				<button class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg" onclick={closeAddColumn}>
+					Cancel
+				</button>
+				<button
+					class="px-4 py-2 bg-sky-500 text-white rounded-lg hover:bg-sky-600 disabled:opacity-50"
+					onclick={createColumn}
+					disabled={loading || !newColumnName.trim()}
+				>
+					{loading ? 'Creating...' : 'Create Column'}
+				</button>
+			</div>
 		</div>
 	</div>
 {/if}
@@ -319,23 +478,71 @@
 				</select>
 			</label>
 
+			<!-- Due Date -->
+			<div class="block mb-4">
+				<span class="text-sm text-gray-500 mb-1 block">Due Date</span>
+				<div class="flex gap-2 items-center mb-2">
+					<input
+						type="date"
+						value={editDueDate ? formatDateForDB(editDueDate) : ''}
+						onfocus={() => showEditDatePicker = true}
+						onchange={(e) => {
+							const val = e.currentTarget.value;
+							editDueDate = val ? new Date(val + 'T00:00:00') : null;
+						}}
+						class="flex-1 p-3 text-black bg-gray-50 border border-gray-200 rounded-lg focus:border-sky-500 focus:outline-none"
+					/>
+					<button
+						type="button"
+						onclick={() => editDueDate = null}
+						class="px-3 py-3 text-gray-500 hover:bg-gray-100 rounded-lg"
+						title="Clear date"
+					>
+						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+						</svg>
+					</button>
+				</div>
+				{#if showEditDatePicker}
+					<div class="relative z-10">
+						<DatePicker bind:value={editDueDate} />
+						<button
+							type="button"
+							onclick={() => showEditDatePicker = false}
+							class="mt-2 px-3 py-1 text-sm text-sky-600 hover:bg-sky-50 rounded"
+						>
+							Done
+						</button>
+					</div>
+				{/if}
+			</div>
+
 			<!-- Space for future features -->
 			<div class="border-t border-gray-200 pt-4 mt-4">
 				<p class="text-sm text-gray-400">More options coming soon...</p>
 			</div>
 
 			<!-- Actions -->
-			<div class="flex justify-end gap-2 mt-6">
-				<button class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg" onclick={closeTaskDetail}>
-					Cancel
-				</button>
+			<div class="flex justify-between mt-6">
 				<button
-					class="px-4 py-2 bg-sky-500 text-white rounded-lg hover:bg-sky-600 disabled:opacity-50"
-					onclick={saveTaskDetail}
+					class="px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg"
+					onclick={deleteTask}
 					disabled={loading}
 				>
-					{loading ? 'Saving...' : 'Save'}
+					Delete
 				</button>
+				<div class="flex gap-2">
+					<button class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg" onclick={closeTaskDetail}>
+						Cancel
+					</button>
+					<button
+						class="px-4 py-2 bg-sky-500 text-white rounded-lg hover:bg-sky-600 disabled:opacity-50"
+						onclick={saveTaskDetail}
+						disabled={loading}
+					>
+						{loading ? 'Saving...' : 'Save'}
+					</button>
+				</div>
 			</div>
 		</div>
 	</div>
