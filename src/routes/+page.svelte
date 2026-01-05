@@ -22,14 +22,63 @@
 	let newTaskDueDate = $state<Date | null>(null);
 	let showAddTaskDatePicker = $state(false);
 
+	// Week picker state
+	let selectedWeek = $state<Date>(getMonday(new Date()));
+
+	function getMonday(date: Date): Date {
+		const d = new Date(date);
+		const day = d.getDay();
+		const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+		d.setDate(diff);
+		d.setHours(0, 0, 0, 0);
+		return d;
+	}
+
+	function formatWeekDisplay(monday: Date): string {
+		const sunday = new Date(monday);
+		sunday.setDate(sunday.getDate() + 6);
+		const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
+		return `${monday.toLocaleDateString('en-US', options)} - ${sunday.toLocaleDateString('en-US', options)}`;
+	}
+
+	function previousWeek() {
+		const prev = new Date(selectedWeek);
+		prev.setDate(prev.getDate() - 7);
+		selectedWeek = prev;
+	}
+
+	function nextWeek() {
+		const next = new Date(selectedWeek);
+		next.setDate(next.getDate() + 7);
+		selectedWeek = next;
+	}
+
+	function goToCurrentWeek() {
+		selectedWeek = getMonday(new Date());
+	}
+
+	function formatDateForDB(date: Date | null): string | null {
+		if (!date) return null;
+		return date.toISOString().split('T')[0];
+	}
+
+	function getSelectedWeekString(): string {
+		return formatDateForDB(selectedWeek) || '';
+	}
+
 	// Create reactive task lists per column
 	let tasksByColumn = $state<Record<string, typeof data.tasks>>({});
 
-	// Initialize tasks by column
+	// Initialize tasks by column (filtered by selected week)
 	$effect(() => {
+		const weekString = getSelectedWeekString();
 		const grouped: Record<string, typeof data.tasks> = {};
 		for (const column of data.columns) {
-			grouped[column.id] = data.tasks.filter((task) => task.column_id === column.id);
+			grouped[column.id] = data.tasks.filter((task) => {
+				const matchesColumn = task.column_id === column.id;
+				const taskWeek = (task as any).week_start;
+				return matchesColumn && taskWeek === weekString;
+			});
 		}
 		tasksByColumn = grouped;
 	});
@@ -38,13 +87,18 @@
 		return tasksByColumn[columnId] ?? [];
 	}
 
-	// Track confirmed task counts (updates only after drop)
+	// Track confirmed task counts (updates only after drop, filtered by week)
 	let confirmedTaskCounts = $state<Record<string, number>>({});
 
 	$effect(() => {
+		const weekString = getSelectedWeekString();
 		const counts: Record<string, number> = {};
 		for (const column of data.columns) {
-			counts[column.id] = data.tasks.filter((task) => task.column_id === column.id).length;
+			counts[column.id] = data.tasks.filter((task) => {
+				const matchesColumn = task.column_id === column.id;
+				const taskWeek = (task as any).week_start;
+				return matchesColumn && taskWeek === weekString;
+			}).length;
 		}
 		confirmedTaskCounts = counts;
 	});
@@ -121,11 +175,6 @@
 		showEditDatePicker = false;
 	}
 
-	function formatDateForDB(date: Date | null): string | null {
-		if (!date) return null;
-		return date.toISOString().split('T')[0];
-	}
-
 	function openAddColumn() {
 		showAddColumn = true;
 		newColumnName = '';
@@ -157,6 +206,26 @@
 		// Refresh the page to get updated columns
 		loading = false;
 		closeAddColumn();
+		window.location.reload();
+	}
+
+	async function deleteColumn(columnId: string) {
+		const tasksInColumn = getTasksForColumn(columnId);
+		if (tasksInColumn.length > 0) {
+			if (!confirm('This column has tasks. Delete column and all its tasks?')) {
+				return;
+			}
+			// Delete all tasks in the column first
+			await data.supabase.from('tasks').delete().eq('column_id', columnId);
+		}
+
+		const { error } = await data.supabase.from('columns').delete().eq('id', columnId);
+
+		if (error) {
+			console.error('Delete column error:', error);
+			return;
+		}
+
 		window.location.reload();
 	}
 
@@ -240,7 +309,42 @@
 
 <div class="min-h-screen bg-white p-6 text-black">
 	<div class="mb-6 flex items-center justify-between">
-		<h1 class="h2 text-black">{data.household?.name ?? 'My Household'}</h1>
+		<div class="flex items-center gap-4">
+			<h1 class="h2 text-black">{data.household?.name ?? 'My Household'}</h1>
+			<a href="/calendar" class="px-3 py-1 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors">
+				Calendar View
+			</a>
+		</div>
+
+		<!-- Week Picker -->
+		<div class="flex items-center gap-3">
+			<button
+				onclick={previousWeek}
+				class="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+				aria-label="Previous week"
+			>
+				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+				</svg>
+			</button>
+
+			<button
+				onclick={goToCurrentWeek}
+				class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors min-w-[180px]"
+			>
+				{formatWeekDisplay(selectedWeek)}
+			</button>
+
+			<button
+				onclick={nextWeek}
+				class="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+				aria-label="Next week"
+			>
+				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+				</svg>
+			</button>
+		</div>
 	</div>
 
 	<!-- Kanban Board -->
@@ -254,13 +358,24 @@
 							<h3 class="font-semibold text-black">{column.name}</h3>
 							<span class="text-sm text-gray-500">{getTaskCountForColumn(column.id)} tasks</span>
 						</div>
-						<button
-							onclick={() => openAddTask(column.id)}
-							class="rounded-full bg-sky-200 text-gray-600 w-7 h-7 flex items-center justify-center hover:bg-[#a8ddfb]"
-							aria-label="Add task"
-						>
-							+
-						</button>
+						<div class="flex items-center gap-1">
+							<button
+								onclick={() => openAddTask(column.id)}
+								class="rounded-full bg-sky-200 text-gray-600 w-7 h-7 flex items-center justify-center hover:bg-[#a8ddfb]"
+								aria-label="Add task"
+							>
+								+
+							</button>
+							<button
+								onclick={() => deleteColumn(column.id)}
+								class="text-gray-400 hover:text-red-500 p-1 transition-colors"
+								aria-label="Delete column"
+							>
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+								</svg>
+							</button>
+						</div>
 					</div>
 				</div>
 
@@ -271,7 +386,8 @@
 					use:dndzone={{
 						items: getTasksForColumn(column.id),
 						flipDurationMs: 0,
-						dropTargetStyle: {}
+						dropTargetStyle: {},
+						morphDisabled: true
 					}}
 					onconsider={(e) => handleDndConsider(column.id, e)}
 					onfinalize={(e) => handleDndFinalize(column.id, e)}
@@ -307,14 +423,16 @@
 		{/each}
 
 		<!-- Add Column Button -->
-		<div class="flex flex-shrink-0 items-start pt-3">
-			<button
-				onclick={openAddColumn}
-				class="rounded-full bg-sky-200 text-gray-600 w-7 h-7 flex items-center justify-center hover:bg-[#a8ddfb]"
-				aria-label="Add column"
-			>
-				+
-			</button>
+		<div class="flex flex-shrink-0 p-3 h-fit">
+			<div class="flex items-center h-[44px]">
+				<button
+					onclick={openAddColumn}
+					class="rounded-full bg-sky-200 text-gray-600 w-9 h-9 flex items-center justify-center hover:bg-[#a8ddfb] text-lg"
+					aria-label="Add column"
+				>
+					+
+				</button>
+			</div>
 		</div>
 	</div>
 </div>
@@ -342,6 +460,7 @@
 			>
 				<input type="hidden" name="columnId" value={selectedColumnId} />
 				<input type="hidden" name="householdId" value={data.member.household_id} />
+				<input type="hidden" name="weekStart" value={getSelectedWeekString()} />
 
 				<label class="block mb-4">
 					<span class="text-sm text-gray-500 mb-1 block">Title</span>

@@ -13,12 +13,19 @@
 	--date-picker-selected-background: #e0f2fe;
 }
 
-/* Remove drag and drop borders */
-[aria-grabbed="true"] {
-	outline: none !important;
+/* Remove all drag and drop borders */
+*[style*="border"] {
 	border: none !important;
+	border-width: 0 !important;
+	border-style: none !important;
+	outline: none !important;
 }
 
-.svelte-dnd-action-dragged-el {
+[aria-grabbed],
+[aria-grabbed="true"],
+[data-is-dnd-shadow-item],
+[data-is-dnd-shadow-item-hint] {
 	outline: none !important;
+	box-shadow: none !important;
+	border: none !important;
 }

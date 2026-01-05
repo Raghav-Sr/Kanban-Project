@@ -65,8 +65,12 @@ export const actions: Actions = {
 		const assigneeId = formData.get('assigneeId') as string | null;
 		const dueDate = formData.get('dueDate') as string | null;
 		const householdId = formData.get('householdId') as string;
+		const weekStart = formData.get('weekStart') as string | null;
+
+		console.log('Create task data:', { title, columnId, householdId, weekStart, assigneeId, dueDate });
 
 		if (!title || !columnId || !householdId) {
+			console.log('Missing required fields:', { title: !!title, columnId: !!columnId, householdId: !!householdId });
 			return fail(400, { message: 'Missing required fields' });
 		}
 
@@ -78,16 +82,22 @@ export const actions: Actions = {
 			.order('position', { ascending: false })
 			.limit(1);
 
-		const position = lastTask?.[0]?.position ?? 0 + 1;
+		const position = (lastTask?.[0]?.position ?? 0) + 1;
 
-		const { error } = await locals.supabase.from('tasks').insert({
+		const taskData: Record<string, unknown> = {
 			title,
 			column_id: columnId,
 			household_id: householdId,
 			assignee_id: assigneeId || null,
 			due_date: dueDate || null,
 			position
-		});
+		};
+
+		if (weekStart) {
+			taskData.week_start = weekStart;
+		}
+
+		const { error } = await locals.supabase.from('tasks').insert(taskData);
 
 		if (error) {
 			console.error('Create task error:', error);

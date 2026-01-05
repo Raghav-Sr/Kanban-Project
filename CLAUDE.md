@@ -13,6 +13,7 @@ A household task management Kanban board for families and roommates sharing a li
 - **Customizable Columns**: Add custom columns beyond the three base statuses
 - **Drag-and-Drop**: Move cards between columns to update status
 - **Task Details**: Click cards to edit info, manage subtasks, archive, or delete
+- **Calendar View**: Shows an overview of each month and what tasks were assigned when, and their due dates
 
 ## Navigation
 
