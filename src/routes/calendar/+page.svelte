@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { dndzone } from 'svelte-dnd-action';
 	import { DatePicker } from 'date-picker-svelte';
 	import type { PageData } from './$types';
 
@@ -16,6 +17,12 @@
 	let editAssigneeId = $state<string | null>(null);
 	let editDueDate = $state<Date | null>(null);
 	let showEditDatePicker = $state(false);
+
+	// Day modal state
+	let showDayModal = $state(false);
+	let selectedDay = $state<Date | null>(null);
+	let dayModalTasksByColumn = $state<Record<string, typeof data.tasks>>({});
+	let hoveredColumnId = $state<string | null>(null);
 
 	// Get the year and month
 	function getYear() {
@@ -124,7 +131,229 @@
 		return 'bg-sky-100 text-sky-800';
 	}
 
+	// Get bar color based on column status
+	function getBarColorByColumn(task: typeof data.tasks[0]): { bg: string; text: string } {
+		const column = data.columns.find((c) => c.id === task.column_id);
+		const columnName = column?.name?.toLowerCase() ?? '';
+
+		if (columnName.includes('not started') || columnName === 'not started') {
+			return { bg: 'bg-rose-300', text: 'text-rose-900' };
+		} else if (columnName.includes('in progress') || columnName === 'in progress') {
+			return { bg: 'bg-sky-300', text: 'text-sky-900' };
+		} else if (columnName.includes('completed') || columnName.includes('done') || columnName === 'completed') {
+			return { bg: 'bg-emerald-300', text: 'text-emerald-900' };
+		} else {
+			return { bg: 'bg-gray-300', text: 'text-gray-700' };
+		}
+	}
+
+	// Get tasks that have both week_start and due_date for bar visualization
+	function getTasksWithDateRange() {
+		return data.tasks.filter((task) => {
+			const weekStart = (task as any).week_start;
+			const dueDate = task.due_date;
+			return weekStart && dueDate && weekStart !== dueDate;
+		});
+	}
+
+	// Calculate the grid position for a date within the current month view
+	function getGridPositionForDate(dateStr: string): { row: number; col: number } | null {
+		const date = new Date(dateStr + 'T00:00:00');
+		const year = getYear();
+		const month = getMonth();
+
+		// Check if date is in current month
+		if (date.getFullYear() !== year || date.getMonth() !== month) {
+			// Return edge positions for dates outside month
+			if (date < new Date(year, month, 1)) {
+				return { row: 0, col: 0 }; // Before month starts
+			} else {
+				const daysInMonth = getDaysInMonth(year, month);
+				const lastDayPos = getFirstDayOfMonth(year, month) + daysInMonth - 1;
+				return { row: Math.floor(lastDayPos / 7), col: lastDayPos % 7 };
+			}
+		}
+
+		const day = date.getDate();
+		const firstDay = getFirstDayOfMonth(year, month);
+		const position = firstDay + day - 1;
+		return { row: Math.floor(position / 7), col: position % 7 };
+	}
+
+	// Calculate bar segment info for a task across rows
+	interface BarSegment {
+		task: typeof data.tasks[0];
+		row: number;
+		startCol: number;
+		endCol: number;
+		isStart: boolean;
+		isEnd: boolean;
+	}
+
+	function getTaskBarSegments(): BarSegment[] {
+		const tasksWithRange = getTasksWithDateRange();
+		const segments: BarSegment[] = [];
+		const year = getYear();
+		const month = getMonth();
+		const firstDayOfMonth = new Date(year, month, 1);
+		const lastDayOfMonth = new Date(year, month + 1, 0);
+
+		tasksWithRange.forEach((task) => {
+			const weekStart = (task as any).week_start as string;
+			const dueDate = task.due_date as string;
+
+			const startDate = new Date(weekStart + 'T00:00:00');
+			const endDate = new Date(dueDate + 'T00:00:00');
+
+			// Clamp dates to current month view
+			const clampedStart = startDate < firstDayOfMonth ? firstDayOfMonth : startDate;
+			const clampedEnd = endDate > lastDayOfMonth ? lastDayOfMonth : endDate;
+
+			// Skip if entirely outside this month
+			if (clampedStart > lastDayOfMonth || clampedEnd < firstDayOfMonth) {
+				return;
+			}
+
+			const startPos = getGridPositionForDate(clampedStart.toISOString().split('T')[0]);
+			const endPos = getGridPositionForDate(clampedEnd.toISOString().split('T')[0]);
+
+			if (!startPos || !endPos) return;
+
+			// Create segments for each row the task spans
+			for (let row = startPos.row; row <= endPos.row; row++) {
+				const segmentStartCol = row === startPos.row ? startPos.col : 0;
+				const segmentEndCol = row === endPos.row ? endPos.col : 6;
+
+				segments.push({
+					task,
+					row,
+					startCol: segmentStartCol,
+					endCol: segmentEndCol,
+					isStart: row === startPos.row && clampedStart.getTime() === startDate.getTime(),
+					isEnd: row === endPos.row && clampedEnd.getTime() === endDate.getTime()
+				});
+			}
+		});
+
+		return segments;
+	}
+
+	// Group segments by row and assign vertical positions to avoid overlap
+	function getSegmentsByRow(): Map<number, (BarSegment & { lane: number })[]> {
+		const segments = getTaskBarSegments();
+		const rowMap = new Map<number, (BarSegment & { lane: number })[]>();
+
+		// Group by row
+		segments.forEach((segment) => {
+			if (!rowMap.has(segment.row)) {
+				rowMap.set(segment.row, []);
+			}
+			rowMap.get(segment.row)!.push({ ...segment, lane: 0 });
+		});
+
+		// Assign lanes within each row to avoid overlap
+		rowMap.forEach((rowSegments) => {
+			// Sort by start column
+			rowSegments.sort((a, b) => a.startCol - b.startCol);
+
+			// Track which lanes are occupied until which column
+			const laneEndCols: number[] = [];
+
+			rowSegments.forEach((segment) => {
+				// Find first available lane
+				let lane = 0;
+				while (lane < laneEndCols.length && laneEndCols[lane] >= segment.startCol) {
+					lane++;
+				}
+				segment.lane = lane;
+				laneEndCols[lane] = segment.endCol;
+			});
+		});
+
+		return rowMap;
+	}
+
+	// Get the number of calendar rows
+	function getCalendarRowCount(): number {
+		const days = getCalendarDays();
+		return Math.ceil(days.length / 7);
+	}
+
 	const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+	// Day modal functions
+	function openDayModal(day: number) {
+		selectedDay = new Date(getYear(), getMonth(), day);
+		initializeDayModalTasks();
+		showDayModal = true;
+	}
+
+	function closeDayModal() {
+		showDayModal = false;
+		selectedDay = null;
+		dayModalTasksByColumn = {};
+		hoveredColumnId = null;
+	}
+
+	function getSelectedDayString(): string {
+		if (!selectedDay) return '';
+		return selectedDay.toISOString().split('T')[0];
+	}
+
+	function formatSelectedDay(): string {
+		if (!selectedDay) return '';
+		return selectedDay.toLocaleDateString('en-US', {
+			weekday: 'long',
+			month: 'long',
+			day: 'numeric',
+			year: 'numeric'
+		});
+	}
+
+	function initializeDayModalTasks() {
+		if (!selectedDay) return;
+		const dateString = selectedDay.toISOString().split('T')[0];
+		const grouped: Record<string, typeof data.tasks> = {};
+		for (const column of data.columns) {
+			grouped[column.id] = data.tasks.filter((task) => {
+				const matchesColumn = task.column_id === column.id;
+				const dueDate = task.due_date;
+				const weekStart = (task as any).week_start;
+				return matchesColumn && (dueDate === dateString || weekStart === dateString);
+			});
+		}
+		dayModalTasksByColumn = grouped;
+	}
+
+	function getTasksForDayByColumn(columnId: string) {
+		return dayModalTasksByColumn[columnId] ?? [];
+	}
+
+	function handleDayModalDndConsider(columnId: string, e: CustomEvent<{ items: typeof data.tasks }>) {
+		dayModalTasksByColumn[columnId] = e.detail.items;
+		hoveredColumnId = columnId;
+	}
+
+	async function handleDayModalDndFinalize(columnId: string, e: CustomEvent<{ items: typeof data.tasks }>) {
+		dayModalTasksByColumn[columnId] = e.detail.items;
+		hoveredColumnId = null;
+
+		// Update tasks that moved to this column
+		for (let i = 0; i < e.detail.items.length; i++) {
+			const task = e.detail.items[i];
+			if (task.column_id !== columnId || task.position !== i) {
+				// Update in database
+				await data.supabase
+					.from('tasks')
+					.update({ column_id: columnId, position: i })
+					.eq('id', task.id);
+
+				// Update local state
+				task.column_id = columnId;
+				task.position = i;
+			}
+		}
+	}
 
 	// Task detail modal functions
 	function formatDateForDB(date: Date | null): string | null {
@@ -251,54 +480,77 @@
 			{/each}
 		</div>
 
-		<!-- Calendar days -->
-		<div class="grid grid-cols-7">
-			{#each getCalendarDays() as day, index}
-				<div
-					class="min-h-[120px] border-b border-r border-gray-200 p-2 {day === null ? 'bg-gray-50' : 'bg-white'}"
-					class:border-r-0={(index + 1) % 7 === 0}
-				>
-					{#if day !== null}
-						<div class="flex items-center justify-between mb-1">
-							<span
-								class="text-sm font-medium {isToday(day) ? 'bg-sky-500 text-white w-7 h-7 rounded-full flex items-center justify-center' : 'text-gray-700'}"
-							>
-								{day}
-							</span>
-						</div>
-
-						<!-- Tasks for this day -->
-						<div class="space-y-1">
-							{#each getTasksForDay(day).slice(0, 3) as { task, type }}
+		<!-- Calendar days with task bars -->
+		<div class="relative">
+			<!-- Calendar grid -->
+			<div class="grid grid-cols-7">
+				{#each getCalendarDays() as day, index}
+					<div
+						class="min-h-[120px] border-b border-r border-gray-200 p-2 {day === null ? 'bg-gray-50' : 'bg-white'}"
+						class:border-r-0={(index + 1) % 7 === 0}
+					>
+						{#if day !== null}
+							<div class="flex items-center justify-between mb-1">
 								<button
-									onclick={() => openTaskDetail(task)}
-									class="w-full text-left text-xs p-1 rounded truncate {getTaskColor(type)} hover:opacity-80 cursor-pointer"
-									title="{task.title} ({type === 'due' ? 'Due' : 'Assigned'})"
+									class="text-sm font-medium cursor-pointer {isToday(day) ? 'bg-sky-500 text-white w-7 h-7 rounded-full flex items-center justify-center' : 'text-gray-700 hover:bg-gray-100 w-7 h-7 rounded-full flex items-center justify-center'}"
+									onclick={() => openDayModal(day)}
 								>
-									{task.title}
+									{day}
 								</button>
-							{/each}
-							{#if getTasksForDay(day).length > 3}
-								<div class="text-xs text-gray-500">
-									+{getTasksForDay(day).length - 3} more
-								</div>
-							{/if}
-						</div>
-					{/if}
-				</div>
+							</div>
+						{/if}
+					</div>
+				{/each}
+			</div>
+
+			<!-- Task bars overlay -->
+			{#each { length: getCalendarRowCount() } as _, rowIndex}
+				{@const rowSegments = getSegmentsByRow().get(rowIndex) ?? []}
+				{#each rowSegments as segment}
+					{@const barColor = getBarColorByColumn(segment.task)}
+					<button
+						class="absolute h-5 {barColor.bg} {barColor.text} text-xs font-medium px-2 truncate cursor-pointer hover:opacity-80 transition-opacity flex items-center shadow-sm"
+						style="
+							top: calc({rowIndex} * 120px + 38px + {segment.lane} * 24px);
+							left: calc({segment.startCol} * (100% / 7) + 4px);
+							width: calc(({segment.endCol - segment.startCol + 1}) * (100% / 7) - 8px);
+						"
+						class:rounded-l-full={segment.isStart}
+						class:rounded-r-full={segment.isEnd}
+						class:rounded-l-none={!segment.isStart}
+						class:rounded-r-none={!segment.isEnd}
+						onclick={() => openTaskDetail(segment.task)}
+						title="{segment.task.title} ({(segment.task as any).week_start} → {segment.task.due_date})"
+					>
+						{#if segment.isStart}
+							{segment.task.title}
+						{/if}
+					</button>
+				{/each}
 			{/each}
 		</div>
 	</div>
 
 	<!-- Legend -->
-	<div class="mt-4 flex items-center gap-6 text-sm text-gray-600">
+	<div class="mt-4 flex flex-wrap items-center gap-4 text-sm text-gray-600">
 		<div class="flex items-center gap-2">
-			<div class="w-3 h-3 rounded bg-sky-100 border border-sky-200"></div>
-			<span>Week assigned</span>
+			<div class="w-6 h-3 rounded-full bg-rose-300"></div>
+			<span>Not Started</span>
 		</div>
 		<div class="flex items-center gap-2">
-			<div class="w-3 h-3 rounded bg-rose-100 border border-rose-200"></div>
-			<span>Due date</span>
+			<div class="w-6 h-3 rounded-full bg-sky-300"></div>
+			<span>In Progress</span>
+		</div>
+		<div class="flex items-center gap-2">
+			<div class="w-6 h-3 rounded-full bg-emerald-300"></div>
+			<span>Completed</span>
+		</div>
+		<div class="flex items-center gap-2">
+			<div class="w-6 h-3 rounded-full bg-gray-300"></div>
+			<span>Other</span>
+		</div>
+		<div class="flex items-center gap-1 text-xs text-gray-500 ml-2">
+			<span class="italic">Bars show task duration (assigned → due)</span>
 		</div>
 	</div>
 </div>
@@ -399,6 +651,77 @@
 						{loading ? 'Saving...' : 'Save'}
 					</button>
 				</div>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- Day Modal with Mini Kanban Board -->
+{#if showDayModal && selectedDay}
+	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onclick={closeDayModal}>
+		<div class="bg-white rounded-lg w-full max-w-5xl p-6 max-h-[90vh] overflow-y-auto" onclick={(e) => e.stopPropagation()}>
+			<!-- Header -->
+			<div class="flex items-center justify-between mb-6">
+				<h2 class="text-xl font-bold text-black">{formatSelectedDay()}</h2>
+				<button
+					class="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
+					onclick={closeDayModal}
+				>
+					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+					</svg>
+				</button>
+			</div>
+
+			<!-- Mini Kanban Board -->
+			<div class="grid gap-4" style="grid-template-columns: repeat({data.columns.length}, minmax(200px, 1fr));">
+				{#each data.columns as column}
+					<div class="bg-gray-50 rounded-lg p-3">
+						<h3 class="font-medium text-gray-700 mb-3 text-sm">{column.name}</h3>
+						<div
+							class="space-y-2 min-h-[100px] rounded-lg p-1 transition-colors duration-150"
+							class:bg-gray-200={hoveredColumnId === column.id}
+							use:dndzone={{
+								items: getTasksForDayByColumn(column.id),
+								flipDurationMs: 0,
+								dropTargetStyle: {},
+								morphDisabled: true
+							}}
+							onconsider={(e) => handleDayModalDndConsider(column.id, e)}
+							onfinalize={(e) => handleDayModalDndFinalize(column.id, e)}
+						>
+							{#each getTasksForDayByColumn(column.id) as task (task.id)}
+								<div
+									class="p-3 bg-sky-100 rounded-lg cursor-grab hover:bg-[#d0ecfd] text-black active:cursor-grabbing"
+								>
+									<div class="flex items-start justify-between">
+										<p class="text-sm font-medium truncate flex-1">{task.title}</p>
+										<button
+											onclick={(e) => { e.stopPropagation(); closeDayModal(); openTaskDetail(task); }}
+											class="text-gray-500 hover:text-gray-900 p-1 -mr-1 -mt-1 transition-colors"
+											aria-label="Edit task"
+										>
+											<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+												<path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+											</svg>
+										</button>
+									</div>
+									{#if task.assignee}
+										<p class="text-xs text-gray-600 mt-1">{task.assignee.name}</p>
+									{/if}
+									{#if task.due_date === getSelectedDayString()}
+										<span class="inline-block mt-1 text-xs px-2 py-0.5 bg-rose-100 text-rose-700 rounded">Due</span>
+									{:else}
+										<span class="inline-block mt-1 text-xs px-2 py-0.5 bg-sky-100 text-sky-700 rounded">Assigned</span>
+									{/if}
+								</div>
+							{/each}
+						</div>
+						{#if getTasksForDayByColumn(column.id).length === 0}
+							<p class="text-xs text-gray-400 text-center py-2">No tasks</p>
+						{/if}
+					</div>
+				{/each}
 			</div>
 		</div>
 	</div>

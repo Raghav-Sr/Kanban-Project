@@ -628,7 +628,7 @@
 						<button
 							type="button"
 							onclick={() => showEditDatePicker = false}
-							class="mt-2 px-3 py-1 text-sm text-sky-600 hover:bg-sky-50 rounded"
+							,class="mt-2 px-3 py-1 text-sm text-sky-600 hover:bg-sky-50 rounded"
 						>
 							Done
 						</button>

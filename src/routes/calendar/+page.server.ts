@@ -21,6 +21,13 @@ export const load: PageServerLoad = async ({ locals }) => {
 		throw redirect(303, '/onboarding');
 	}
 
+	// Get columns for the household
+	const { data: columns } = await locals.supabase
+		.from('columns')
+		.select('*')
+		.eq('household_id', member.household_id)
+		.order('position');
+
 	// Get all tasks for the household (we'll filter by month on the client)
 	const { data: tasks } = await locals.supabase
 		.from('tasks')
@@ -37,6 +44,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 	return {
 		member,
 		household: member.households,
+		columns: columns ?? [],
 		tasks: tasks ?? [],
 		members: householdMembers ?? []
 	};
